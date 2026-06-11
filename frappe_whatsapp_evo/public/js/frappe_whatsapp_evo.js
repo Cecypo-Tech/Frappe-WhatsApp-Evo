@@ -77,7 +77,11 @@ frappe.whatsapp_evo.show_send_dialog = function (frm) {
 		],
 		primary_action_label: __("Send"),
 		primary_action: function (values) {
-			dialog.disable_primary_action();
+			dialog.hide();
+			frappe.show_alert({
+				message: __("Sending WhatsApp message..."),
+				indicator: "blue"
+			}, 3);
 			frappe.call({
 				method: "frappe_whatsapp_evo.api.send_whatsapp_with_media",
 				args: {
@@ -88,18 +92,19 @@ frappe.whatsapp_evo.show_send_dialog = function (frm) {
 					attach_type: values.attach_type === "None" ? null : values.attach_type,
 					print_format: values.print_format,
 				},
-				freeze: true,
-				freeze_message: __("Sending WhatsApp message..."),
 				callback: function (r) {
-					dialog.hide();
-					frappe.msgprint({
-						title: __("Success"),
-						message: __("WhatsApp message sent successfully."),
-						indicator: "green",
-					});
+					if (!r.exc) {
+						frappe.show_alert({
+							message: __("WhatsApp message sent successfully."),
+							indicator: "green"
+						}, 5);
+					}
 				},
 				error: function (r) {
-					dialog.enable_primary_action();
+					frappe.show_alert({
+						message: __("Failed to send WhatsApp message."),
+						indicator: "red"
+					}, 5);
 				},
 			});
 		},
