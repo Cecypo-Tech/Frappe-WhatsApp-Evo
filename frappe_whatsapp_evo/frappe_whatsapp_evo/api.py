@@ -100,6 +100,33 @@ def _insert_message_log(
 		}
 	)
 	doc.insert(ignore_permissions=True)
+
+	if direction == "Outgoing" and reference_doctype and reference_name:
+		try:
+			recipient = to or ""
+			if status == "Failed":
+				comment_text = f"❌ <b>WhatsApp message to {recipient} failed:</b><br>{error or ''}"
+			else:
+				msg_text = message or ""
+				attachment_info = f" ({message_type})" if message_type != "text" else ""
+				comment_text = f"💬 <b>WhatsApp message sent to {recipient}{attachment_info}:</b><br>{msg_text}"
+
+			comment = frappe.new_doc("Comment")
+			comment.update(
+				{
+					"comment_type": "Comment",
+					"reference_doctype": reference_doctype,
+					"reference_name": reference_name,
+					"comment_email": frappe.session.user or "Administrator",
+					"comment_by": frappe.session.user_fullname or "System",
+					"content": comment_text,
+				}
+			)
+			comment.insert(ignore_permissions=True)
+		except Exception:
+			# Prevent logging failure from blocking the primary transaction
+			frappe.log_error(title="WA Message Comment Logging Failed")
+
 	return doc
 
 
