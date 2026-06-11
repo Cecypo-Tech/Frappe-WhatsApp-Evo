@@ -1,0 +1,57 @@
+[project]
+name = "frappe_whatsapp_evo"
+authors = [
+    { name = "Cecypo.Tech", email = "support@cecypo.tech"}
+]
+description = "Simple Evolution API integration for Frappe/ERPNext v16"
+requires-python = ">=3.10"
+readme = "README.md"
+license = "MIT"
+dynamic = ["version"]
+dependencies = [
+    "requests>=2.31.0"
+]
+
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"
+
+[tool.bench.frappe-dependencies]
+frappe = ">=16.0.0,<17.0.0"
+
+[tool.bench.dev-dependencies]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "F",
+    "E",
+    "W",
+    "I",
+    "UP",
+    "B",
+    "RUF",
+]
+ignore = [
+    "B017",
+    "B018",
+    "B023",
+    "B904",
+    "E101",
+    "E402",
+    "E501",
+    "E741",
+    "F401",
+    "F403",
+    "F405",
+    "F722",
+    "W191",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "tab"
+docstring-code-format = true

@@ -1,0 +1,204 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "WEVO-.YYYY.-.#####",
+ "creation": "2026-06-11 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "direction",
+  "status",
+  "message_type",
+  "column_break_main",
+  "to_number",
+  "from_number",
+  "message",
+  "media_section",
+  "media_url",
+  "mimetype",
+  "filename",
+  "evolution_section",
+  "instance_name",
+  "evolution_message_id",
+  "webhook_event",
+  "reference_section",
+  "reference_doctype",
+  "reference_name",
+  "payload_section",
+  "response_json",
+  "raw_payload",
+  "error"
+ ],
+ "fields": [
+  {
+   "default": "Outgoing",
+   "fieldname": "direction",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Direction",
+   "options": "Outgoing\nIncoming",
+   "reqd": 1
+  },
+  {
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status"
+  },
+  {
+   "default": "text",
+   "fieldname": "message_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Message Type",
+   "options": "text\nimage\nvideo\ndocument",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.direction == 'Outgoing'",
+   "fieldname": "to_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "To"
+  },
+  {
+   "depends_on": "eval:doc.direction == 'Incoming'",
+   "fieldname": "from_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "From"
+  },
+  {
+   "fieldname": "message",
+   "fieldtype": "Text Editor",
+   "label": "Message"
+  },
+  {
+   "depends_on": "eval:doc.message_type != 'text'",
+   "fieldname": "media_section",
+   "fieldtype": "Section Break",
+   "label": "Media"
+  },
+  {
+   "depends_on": "eval:doc.message_type != 'text'",
+   "description": "Public URL or base64 media content accepted by Evolution API.",
+   "fieldname": "media_url",
+   "fieldtype": "Long Text",
+   "label": "Media"
+  },
+  {
+   "depends_on": "eval:doc.message_type != 'text'",
+   "fieldname": "mimetype",
+   "fieldtype": "Data",
+   "label": "MIME Type"
+  },
+  {
+   "depends_on": "eval:doc.message_type != 'text'",
+   "fieldname": "filename",
+   "fieldtype": "Data",
+   "label": "Filename"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "evolution_section",
+   "fieldtype": "Section Break",
+   "label": "Evolution API"
+  },
+  {
+   "fieldname": "instance_name",
+   "fieldtype": "Data",
+   "label": "Instance Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "evolution_message_id",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Evolution Message ID",
+   "read_only": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "webhook_event",
+   "fieldtype": "Data",
+   "label": "Webhook Event",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "reference_section",
+   "fieldtype": "Section Break",
+   "label": "Reference"
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "label": "Reference DocType",
+   "options": "DocType"
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Dynamic Link",
+   "label": "Reference Name",
+   "options": "reference_doctype"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "payload_section",
+   "fieldtype": "Section Break",
+   "label": "Payloads"
+  },
+  {
+   "fieldname": "response_json",
+   "fieldtype": "JSON",
+   "label": "Response JSON",
+   "read_only": 1
+  },
+  {
+   "fieldname": "raw_payload",
+   "fieldtype": "JSON",
+   "label": "Raw Payload",
+   "read_only": 1
+  },
+  {
+   "fieldname": "error",
+   "fieldtype": "Small Text",
+   "label": "Error",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-06-11 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Whatsapp Evo",
+ "name": "WhatsApp Evo Message",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 1,
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
