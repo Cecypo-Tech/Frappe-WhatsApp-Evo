@@ -19,6 +19,12 @@ You must have a running instance of the [Evolution API](https://github.com/evolu
 - Register a Frappe webhook URL on the Evolution API instance.
 - Log incoming and outgoing payloads in `WhatsApp Evo Message`.
 
+## Screenshots
+
+![Evolution API Settings](https://i.imgur.com/8INGulk.png)
+
+![Send WhatsApp Dialog](https://i.imgur.com/RYHXoOT.png)
+
 ## Installation
 
 ```bash
