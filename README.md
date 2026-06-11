@@ -2,6 +2,14 @@
 
 Simple Evolution API integration for Frappe/ERPNext v16.
 
+## Requirements
+
+You must have a running instance of the [Evolution API](https://github.com/evolution-api/evolution-api) to use this integration.
+
+> [!WARNING]
+> **Using the Evolution API carries a high risk of WhatsApp account suspension or permanent bans.**
+> Because it is an unofficial integration that reverse-engineers WhatsApp Web, it violates WhatsApp's Terms of Service. Bans often happen without prior warning, especially during routine Meta protocol updates.
+
 ## Features
 
 - Store Evolution API base URL, instance name, and API key in a single settings DocType.
@@ -69,6 +77,16 @@ frappe.call(
     caption="Invoice attached",
 )
 ```
+
+## Disclaimer
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ## License
 
