@@ -154,6 +154,9 @@ class EvolutionAPIClient:
 	def get_connection_state(self) -> dict:
 		return self.request("GET", f"/instance/connectionState/{self.get_route_instance_name()}")
 
+	def get_qr_code(self) -> dict:
+		return self.request("GET", f"/instance/connect/{self.get_route_instance_name()}")
+
 	def send_text(self, to: str, message: str, delay: int | None = None, link_preview: bool = True) -> dict:
 		if not message:
 			frappe.throw(_("Message is required"))

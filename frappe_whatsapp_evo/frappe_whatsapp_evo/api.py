@@ -136,6 +136,11 @@ def fetch_instances():
 
 
 @frappe.whitelist()
+def get_qr_code():
+	return EvolutionAPIClient().get_qr_code()
+
+
+@frappe.whitelist()
 def diagnose_webhook_routes():
 	client = EvolutionAPIClient()
 	instance = client.get_route_instance_name()

@@ -88,6 +88,55 @@ frappe.ui.form.on("Evolution API Settings", {
 				});
 			});
 
+			frm.add_custom_button(__("Get QR Code"), () => {
+				frappe.call({
+					method: "frappe_whatsapp_evo.api.get_qr_code",
+					freeze: true,
+					freeze_message: __("Fetching QR code from Evolution API..."),
+					callback(r) {
+						if (!r.message) return;
+
+						const resp = r.message;
+						const qrcode = resp.qrcode || resp;
+						const base64 = qrcode.base64 || resp.base64 || "";
+						const code = qrcode.code || resp.code || "";
+						const pairingCode = qrcode.pairingCode || resp.pairingCode || "";
+
+						if (!base64) {
+							const state = resp.instance && resp.instance.state;
+							if (state === "open") {
+								frappe.show_alert({
+									message: __("WhatsApp is already connected — no QR code needed."),
+									indicator: "green",
+								});
+							} else {
+								frappe.msgprint({
+									title: __("QR Code"),
+									indicator: "orange",
+									message: __("No QR code returned. Instance state: <strong>{0}</strong>", [state || __("unknown")]),
+								});
+							}
+							return;
+						}
+
+						const imgSrc = base64.startsWith("data:") ? base64 : `data:image/png;base64,${base64}`;
+						let html = `<div style="text-align:center;">
+							<p>${__("Scan this QR code with your WhatsApp app to connect.")}</p>
+							<img src="${imgSrc}" style="max-width:300px;width:100%;border:1px solid #ddd;border-radius:4px;" />`;
+						if (pairingCode) {
+							html += `<p style="margin-top:12px;">${__("Pairing Code:")} <strong>${frappe.utils.escape_html(pairingCode)}</strong></p>`;
+						}
+						html += `</div>`;
+
+						frappe.msgprint({
+							title: __("Scan QR Code"),
+							message: html,
+							wide: false,
+						});
+					},
+				});
+			});
+
 			frm.add_custom_button(__("Configure Webhook"), () => {
 				frappe.confirm(
 					__(
