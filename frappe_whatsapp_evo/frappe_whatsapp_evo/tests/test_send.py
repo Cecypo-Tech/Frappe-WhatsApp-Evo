@@ -62,6 +62,19 @@ class TestSendPermissions(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			api.send_text(to="0725548065", message="hi", line="TEST-SEND-DISABLED")
 
+	def test_send_media_disabled_line_blocked(self):
+		_add_line("TEST-SEND-MEDIA-DISABLED", disabled=1)
+
+		with self.assertRaises(frappe.ValidationError):
+			api.send_media(
+				to="0725548065",
+				media="aGVsbG8=",
+				mediatype="image",
+				mimetype="image/png",
+				filename="hi.png",
+				line="TEST-SEND-MEDIA-DISABLED",
+			)
+
 	@patch("frappe_whatsapp_evo.frappe_whatsapp_evo.client.EvolutionAPIClient.send_text")
 	def test_send_message_doc_resolves_line_from_stored_instance_name(self, mock_send_text):
 		mock_send_text.return_value = {"status": "PENDING", "key": {"id": "wamid.2"}}
