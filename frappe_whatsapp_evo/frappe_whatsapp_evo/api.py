@@ -1,6 +1,5 @@
 import base64
 import json
-from urllib.parse import urlencode
 
 import frappe
 from frappe import _
@@ -15,17 +14,6 @@ from frappe_whatsapp_evo.frappe_whatsapp_evo.doctype.evolution_api_settings.evol
 	find_line,
 	get_line,
 )
-
-
-def get_settings():
-	return frappe.get_single("Evolution API Settings")
-
-
-def get_webhook_url() -> str:
-	settings = get_settings()
-	token = settings.get_password("webhook_secret") if settings.webhook_secret else None
-	query = f"?{urlencode({'token': token})}" if token else ""
-	return frappe.utils.get_url(f"/api/method/frappe_whatsapp_evo.api.webhook{query}")
 
 
 def _as_json(value) -> str:
@@ -439,24 +427,32 @@ def send_message_doc(name: str):
 	return result
 
 
-def _validate_webhook_request():
-	settings = get_settings()
-	expected = settings.get_password("webhook_secret") if settings.webhook_secret else None
-	if not expected:
-		return
+def _find_line_by_webhook_token(token: str | None):
+	if not token:
+		return None
+	settings = frappe.get_single("Evolution API Settings")
+	for row in settings.evo_lines:
+		secret = row.get_password("webhook_secret") if row.webhook_secret else None
+		if secret and secret == token:
+			return row
+	return None
 
-	received = (
+
+def _validate_webhook_request():
+	token = (
 		frappe.form_dict.get("token")
 		or frappe.get_request_header("X-Webhook-Secret")
 		or frappe.get_request_header("X-Evolution-Webhook-Secret")
 	)
-	if received != expected:
+	row = _find_line_by_webhook_token(token)
+	if not row:
 		frappe.throw(_("Invalid webhook token"), frappe.PermissionError)
+	return row
 
 
 @frappe.whitelist(allow_guest=True)
 def webhook():
-	_validate_webhook_request()
+	line = _validate_webhook_request()
 
 	payload = frappe.local.form_dict
 	if frappe.request and frappe.request.data:
@@ -466,10 +462,13 @@ def webhook():
 			payload = dict(frappe.local.form_dict)
 
 	event = payload.get("event")
-	instance_name = payload.get("instance")
 	extracted = _extract_message_payload(payload)
 	data = extracted["data"]
-	remote_number = normalize_phone(extracted["remote_jid"] or "", get_settings().default_country_code) if extracted["remote_jid"] else None
+	remote_number = (
+		normalize_phone(extracted["remote_jid"] or "", line.default_country_code)
+		if extracted["remote_jid"]
+		else None
+	)
 	direction = "Outgoing" if extracted["from_me"] else "Incoming"
 
 	existing = None
@@ -494,7 +493,7 @@ def webhook():
 			message_type=data.get("messageType") or "text",
 			raw_payload=payload,
 			webhook_event=event,
-			instance_name=instance_name,
+			instance_name=line.instance_name,
 		)
 		doc.db_set("evolution_message_id", extracted["message_id"], update_modified=False)
 
