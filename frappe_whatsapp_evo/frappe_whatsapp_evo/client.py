@@ -60,13 +60,13 @@ def redact_secrets(value):
 
 
 class EvolutionAPIClient:
-	def __init__(self, settings=None):
-		self.settings = settings or frappe.get_single("Evolution API Settings")
-		self.base_url = (self.settings.base_url or "").strip().rstrip("/")
-		self.instance_identifier = (self.settings.instance_name or "").strip()
+	def __init__(self, line):
+		self.settings = line
+		self.base_url = (line.base_url or "").strip().rstrip("/")
+		self.instance_identifier = (line.instance_name or "").strip()
 		self.instance_name = self.instance_identifier
-		self.api_key = get_password_value(self.settings, "api_key")
-		self.timeout = int(self.settings.timeout or 30)
+		self.api_key = get_password_value(line, "api_key")
+		self.timeout = int(line.timeout or 30)
 
 		if not self.base_url:
 			frappe.throw(_("Evolution API Base URL is required"))
