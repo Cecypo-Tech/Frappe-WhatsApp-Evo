@@ -21,10 +21,6 @@ def get_settings():
 	return frappe.get_single("Evolution API Settings")
 
 
-def _set_single_value(fieldname: str, value):
-	frappe.db.set_single_value("Evolution API Settings", fieldname, value)
-
-
 def get_webhook_url() -> str:
 	settings = get_settings()
 	token = settings.get_password("webhook_secret") if settings.webhook_secret else None
@@ -135,18 +131,27 @@ def _insert_message_log(
 
 
 @frappe.whitelist()
-def fetch_instances():
-	return EvolutionAPIClient().fetch_instances()
+def get_available_lines():
+	from frappe_whatsapp_evo.frappe_whatsapp_evo.doctype.evolution_api_settings.evolution_api_settings import (
+		get_available_lines_for_user,
+	)
+
+	return get_available_lines_for_user()
 
 
 @frappe.whitelist()
-def get_qr_code():
-	return EvolutionAPIClient().get_qr_code()
+def fetch_instances(line: str):
+	return EvolutionAPIClient(find_line(line)).fetch_instances()
 
 
 @frappe.whitelist()
-def diagnose_webhook_routes():
-	client = EvolutionAPIClient()
+def get_qr_code(line: str):
+	return EvolutionAPIClient(find_line(line)).get_qr_code()
+
+
+@frappe.whitelist()
+def diagnose_webhook_routes(line: str):
+	client = EvolutionAPIClient(find_line(line))
 	instance = client.get_route_instance_name()
 	paths = [
 		f"/webhook/get/{instance}",
@@ -168,25 +173,26 @@ def diagnose_webhook_routes():
 
 
 @frappe.whitelist()
-def test_connection():
-	client = EvolutionAPIClient()
+def test_connection(line: str):
+	row = find_line(line)
+	client = EvolutionAPIClient(row)
 	result = client.get_connection_state()
 
-	_set_single_value("last_connection_state", frappe.as_json(result))
-	_set_single_value("last_tested_on", frappe.utils.now_datetime())
+	frappe.db.set_value("Evo Line", row.name, "last_connection_state", frappe.as_json(result))
+	frappe.db.set_value("Evo Line", row.name, "last_tested_on", frappe.utils.now_datetime())
 
 	return result
 
 
 @frappe.whitelist()
-def configure_webhook():
-	client = EvolutionAPIClient()
-	url = get_webhook_url()
+def configure_webhook(line: str):
+	row = find_line(line)
+	client = EvolutionAPIClient(row)
+	url = row.webhook_url
 	result = client.set_webhook(url)
 	safe_result = redact_secrets(result)
 
-	_set_single_value("webhook_url", url)
-	_set_single_value("last_webhook_response", frappe.as_json(safe_result))
+	frappe.db.set_value("Evo Line", row.name, "last_webhook_response", frappe.as_json(safe_result))
 
 	return {"webhook_url": url, "response": safe_result}
 
