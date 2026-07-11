@@ -1,9 +1,12 @@
 frappe.ui.form.on("Evolution API Settings", {
 	refresh(frm) {
-		if (!frm.is_new()) {
-			frm.add_custom_button(__("Test Connection"), () => {
+		if (frm.is_new()) return;
+
+		frm.add_custom_button(__("Test Connection"), () => {
+			pick_line(frm, (line) => {
 				frappe.call({
 					method: "frappe_whatsapp_evo.api.test_connection",
+					args: { line },
 					freeze: true,
 					freeze_message: __("Testing Evolution API connection..."),
 					callback(r) {
@@ -31,10 +34,13 @@ frappe.ui.form.on("Evolution API Settings", {
 					},
 				});
 			});
+		});
 
-			frm.add_custom_button(__("Fetch Instances"), () => {
+		frm.add_custom_button(__("Fetch Instances"), () => {
+			pick_line(frm, (line) => {
 				frappe.call({
 					method: "frappe_whatsapp_evo.api.fetch_instances",
+					args: { line },
 					freeze: true,
 					freeze_message: __("Fetching Evolution API instances..."),
 					callback(r) {
@@ -87,10 +93,13 @@ frappe.ui.form.on("Evolution API Settings", {
 					},
 				});
 			});
+		});
 
-			frm.add_custom_button(__("Get QR Code"), () => {
+		frm.add_custom_button(__("Get QR Code"), () => {
+			pick_line(frm, (line) => {
 				frappe.call({
 					method: "frappe_whatsapp_evo.api.get_qr_code",
+					args: { line },
 					freeze: true,
 					freeze_message: __("Fetching QR code from Evolution API..."),
 					callback(r) {
@@ -136,8 +145,10 @@ frappe.ui.form.on("Evolution API Settings", {
 					},
 				});
 			});
+		});
 
-			frm.add_custom_button(__("Configure Webhook"), () => {
+		frm.add_custom_button(__("Configure Webhook"), () => {
+			pick_line(frm, (line) => {
 				frappe.confirm(
 					__(
 						"Evolution API normally stores one webhook configuration per instance. This may replace an existing webhook used by another system. Continue?"
@@ -145,6 +156,7 @@ frappe.ui.form.on("Evolution API Settings", {
 					() => {
 						frappe.call({
 							method: "frappe_whatsapp_evo.api.configure_webhook",
+							args: { line },
 							freeze: true,
 							freeze_message: __("Configuring Evolution API webhook..."),
 							callback(r) {
@@ -160,6 +172,36 @@ frappe.ui.form.on("Evolution API Settings", {
 					}
 				);
 			});
-		}
+		});
 	},
 });
+
+function pick_line(frm, callback) {
+	const rows = (frm.doc.evo_lines || []).filter((r) => r.instance_name);
+	if (rows.length === 0) {
+		frappe.msgprint({
+			title: __("No Evo Lines"),
+			indicator: "orange",
+			message: __("Add at least one Evo Line before using this action."),
+		});
+		return;
+	}
+	if (rows.length === 1) {
+		callback(rows[0].instance_name);
+		return;
+	}
+	frappe.prompt(
+		[
+			{
+				label: __("Evo Line"),
+				fieldname: "line",
+				fieldtype: "Select",
+				options: rows.map((r) => r.instance_name),
+				default: rows[0].instance_name,
+				reqd: 1,
+			},
+		],
+		(values) => callback(values.line),
+		__("Select Evo Line")
+	);
+}
