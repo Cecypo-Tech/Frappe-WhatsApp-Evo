@@ -5,105 +5,41 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "connection_section",
-  "base_url",
-  "instance_name",
-  "api_key",
-  "timeout",
-  "default_country_code",
-  "webhook_section",
-  "webhook_secret",
-  "webhook_url",
-  "last_webhook_response",
-  "status_section",
-  "last_tested_on",
-  "last_connection_state"
+  "lines_section",
+  "evo_lines",
+  "restrictions_section",
+  "line_restrictions"
  ],
  "fields": [
   {
-   "fieldname": "connection_section",
+   "fieldname": "lines_section",
    "fieldtype": "Section Break",
-   "label": "Connection"
+   "label": "Evo Lines"
   },
   {
-   "description": "Base URL for the Evolution API server, for example https://evo.example.com",
-   "fieldname": "base_url",
-   "fieldtype": "Data",
-   "in_list_view": 1,
-   "label": "Base URL",
-   "reqd": 1
+   "description": "Each row is an independent Evolution API connection (\"line\"). Add one row per WhatsApp number/instance.",
+   "fieldname": "evo_lines",
+   "fieldtype": "Table",
+   "label": "Evo Lines",
+   "options": "Evo Line"
   },
   {
-   "description": "Evolution API instance name already running on the VPS.",
-   "fieldname": "instance_name",
-   "fieldtype": "Data",
-   "in_list_view": 1,
-   "label": "Instance Name",
-   "reqd": 1
-  },
-  {
-   "fieldname": "api_key",
-   "fieldtype": "Password",
-   "label": "API Key / Instance Token",
-   "reqd": 1
-  },
-  {
-   "default": "30",
-   "fieldname": "timeout",
-   "fieldtype": "Int",
-   "label": "Timeout (Seconds)"
-  },
-  {
-   "description": "Optional country code used when a number starts with 0. Example: 254.",
-   "fieldname": "default_country_code",
-   "fieldtype": "Data",
-   "label": "Default Country Code"
-  },
-  {
-   "fieldname": "webhook_section",
+   "fieldname": "restrictions_section",
    "fieldtype": "Section Break",
-   "label": "Webhook"
+   "label": "Line Restrictions"
   },
   {
-   "description": "Secret appended to the webhook URL and verified by Frappe.",
-   "fieldname": "webhook_secret",
-   "fieldtype": "Password",
-   "label": "Webhook Secret"
-  },
-  {
-   "fieldname": "webhook_url",
-   "fieldtype": "Small Text",
-   "label": "Webhook URL",
-   "read_only": 1
-  },
-  {
-   "fieldname": "last_webhook_response",
-   "fieldtype": "JSON",
-   "label": "Last Webhook Response",
-   "read_only": 1
-  },
-  {
-   "fieldname": "status_section",
-   "fieldtype": "Section Break",
-   "label": "Status"
-  },
-  {
-   "fieldname": "last_tested_on",
-   "fieldtype": "Datetime",
-   "label": "Last Tested On",
-   "read_only": 1
-  },
-  {
-   "fieldname": "last_connection_state",
-   "fieldtype": "JSON",
-   "label": "Last Connection State",
-   "read_only": 1
+   "description": "Restrict which users can use a given line by adding rows here (Line must match an Evo Line's Instance Name). A line with no matching rows is open to all users.",
+   "fieldname": "line_restrictions",
+   "fieldtype": "Table",
+   "label": "Line Restrictions",
+   "options": "Evo Line Restriction"
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-06-11 00:00:00.000000",
+ "modified": "2026-07-11 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Whatsapp Evo",
  "name": "Evolution API Settings",
