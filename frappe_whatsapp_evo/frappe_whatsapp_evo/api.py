@@ -11,6 +11,10 @@ from frappe_whatsapp_evo.frappe_whatsapp_evo.client import (
 	normalize_phone,
 	redact_secrets,
 )
+from frappe_whatsapp_evo.frappe_whatsapp_evo.doctype.evolution_api_settings.evolution_api_settings import (
+	find_line,
+	get_line,
+)
 
 
 def get_settings():
@@ -96,7 +100,7 @@ def _insert_message_log(
 			"reference_doctype": reference_doctype,
 			"reference_name": reference_name,
 			"webhook_event": webhook_event,
-			"instance_name": instance_name or (get_settings().instance_name if frappe.db.exists("DocType", "Evolution API Settings") else None),
+			"instance_name": instance_name,
 		}
 	)
 	doc.insert(ignore_permissions=True)
@@ -191,12 +195,14 @@ def configure_webhook():
 def send_text(
 	to: str,
 	message: str,
+	line: str,
 	delay: int | None = None,
 	link_preview: bool = True,
 	reference_doctype: str | None = None,
 	reference_name: str | None = None,
 ):
-	client = EvolutionAPIClient()
+	row = get_line(line)
+	client = EvolutionAPIClient(row)
 	try:
 		result = client.send_text(to, message, delay=delay, link_preview=frappe.utils.cint(link_preview))
 	except Exception as exc:
@@ -208,18 +214,19 @@ def send_text(
 			error=str(exc),
 			reference_doctype=reference_doctype,
 			reference_name=reference_name,
+			instance_name=row.instance_name,
 		)
 		raise
 
 	doc = _insert_message_log(
 		direction="Outgoing",
 		status=result.get("status") or "Sent",
-		to=normalize_phone(to, client.settings.default_country_code),
+		to=normalize_phone(to, row.default_country_code),
 		message=message,
 		response_json=result,
 		reference_doctype=reference_doctype,
 		reference_name=reference_name,
-		instance_name=client.instance_name,
+		instance_name=row.instance_name,
 	)
 	return {"message_log": doc.name, "response": result}
 
@@ -231,12 +238,14 @@ def send_media(
 	mediatype: str,
 	mimetype: str,
 	filename: str,
+	line: str,
 	caption: str | None = None,
 	delay: int | None = None,
 	reference_doctype: str | None = None,
 	reference_name: str | None = None,
 ):
-	client = EvolutionAPIClient()
+	row = get_line(line)
+	client = EvolutionAPIClient(row)
 	try:
 		result = client.send_media(
 			to=to,
@@ -258,20 +267,21 @@ def send_media(
 			error=str(exc),
 			reference_doctype=reference_doctype,
 			reference_name=reference_name,
+			instance_name=row.instance_name,
 		)
 		raise
 
 	doc = _insert_message_log(
 		direction="Outgoing",
 		status=result.get("status") or "Sent",
-		to=normalize_phone(to, client.settings.default_country_code),
+		to=normalize_phone(to, row.default_country_code),
 		message=caption,
 		message_type=mediatype,
 		media_url=media,
 		response_json=result,
 		reference_doctype=reference_doctype,
 		reference_name=reference_name,
-		instance_name=client.instance_name,
+		instance_name=row.instance_name,
 	)
 	return {"message_log": doc.name, "response": result}
 
@@ -355,23 +365,22 @@ def send_whatsapp_with_media(
 	message: str,
 	doctype: str,
 	name: str,
-	attach_type: str = None, # "PDF" or None
-	print_format: str = None
+	line: str,
+	attach_type: str = None,  # "PDF" or None
+	print_format: str = None,
 ):
 	"""Send WhatsApp message with optional PDF attachment."""
 	if not attach_type or attach_type == "None":
-		return send_text(to=to, message=message, reference_doctype=doctype, reference_name=name)
+		return send_text(to=to, message=message, line=line, reference_doctype=doctype, reference_name=name)
 
 	if attach_type == "PDF":
-		# Generate PDF
 		media_content = frappe.get_print(doctype, name, print_format=print_format, as_pdf=True)
 		filename = f"{name.replace('/', '-')}.pdf"
 		mimetype = "application/pdf"
 		mediatype = "document"
 	else:
-		return send_text(to=to, message=message, reference_doctype=doctype, reference_name=name)
-	
-	# Save as base64 for Evolution API
+		return send_text(to=to, message=message, line=line, reference_doctype=doctype, reference_name=name)
+
 	b64_data = base64.b64encode(media_content).decode("utf-8")
 
 	return send_media(
@@ -381,8 +390,9 @@ def send_whatsapp_with_media(
 		mimetype=mimetype,
 		filename=filename,
 		caption=message,
+		line=line,
 		reference_doctype=doctype,
-		reference_name=name
+		reference_name=name,
 	)
 
 
@@ -395,11 +405,14 @@ def send_message_doc(name: str):
 		frappe.throw(_("Only outgoing messages can be sent"))
 	if doc.status in {"Sent", "PENDING", "SUCCESS"}:
 		frappe.throw(_("This message has already been sent"))
+	if not doc.instance_name:
+		frappe.throw(_("This message has no Evo Line recorded and cannot be resent"))
 
 	if doc.message_type == "text":
 		result = send_text(
 			to=doc.to_number,
 			message=doc.message,
+			line=doc.instance_name,
 			reference_doctype=doc.reference_doctype,
 			reference_name=doc.reference_name,
 		)
@@ -411,6 +424,7 @@ def send_message_doc(name: str):
 			mimetype=doc.mimetype,
 			filename=doc.filename,
 			caption=doc.message,
+			line=doc.instance_name,
 			reference_doctype=doc.reference_doctype,
 			reference_name=doc.reference_name,
 		)
@@ -458,7 +472,9 @@ def webhook():
 
 	if existing:
 		doc = frappe.get_doc("WhatsApp Evo Message", existing)
-		doc.status = "Updated" if event == "MESSAGES_UPDATE" else doc.status
+		if event == "MESSAGES_UPDATE":
+			update_status = (data.get("update") or {}).get("status") or data.get("status")
+			doc.status = update_status or "Updated"
 		doc.raw_payload = _as_json(payload)
 		doc.webhook_event = event
 		doc.save(ignore_permissions=True)
