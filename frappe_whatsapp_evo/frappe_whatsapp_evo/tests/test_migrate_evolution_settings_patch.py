@@ -67,3 +67,29 @@ class TestMigrateEvolutionSettingsPatch(IntegrationTestCase):
 
 		settings = frappe.get_single("Evolution API Settings")
 		self.assertFalse(any(r.instance_name == "legacy-instance" for r in settings.evo_lines))
+
+	def test_noop_when_base_url_present_but_instance_name_missing(self):
+		# A legacy install with base_url set but instance_name blank/missing must
+		# not attempt to migrate: settings.save() would otherwise hit
+		# EvolutionAPISettings.validate_lines()'s "Instance Name is required"
+		# throw and abort `bench migrate` for that install.
+		frappe.db.sql("delete from `tabSingles` where doctype='Evolution API Settings'")
+		frappe.db.sql(
+			"insert into `tabSingles` (doctype, field, value) values (%(doctype)s, %(field)s, %(value)s)",
+			{
+				"doctype": "Evolution API Settings",
+				"field": "base_url",
+				"value": "https://legacy.example.com",
+			},
+		)
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- patch reads via a fresh query
+
+		settings_before = frappe.get_single("Evolution API Settings")
+		line_count_before = len(settings_before.evo_lines)
+
+		execute()  # must not throw
+
+		settings = frappe.get_single("Evolution API Settings")
+		self.assertFalse(any(r.instance_name == "legacy-instance" for r in settings.evo_lines))
+		self.assertFalse(any(not r.instance_name for r in settings.evo_lines))
+		self.assertEqual(len(settings.evo_lines), line_count_before)

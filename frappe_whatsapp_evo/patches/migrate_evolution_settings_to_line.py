@@ -29,7 +29,7 @@ def execute():
 		as_dict=True,
 	)
 	values = {row.field: row.value for row in rows}
-	if not values.get("base_url") and not values.get("instance_name"):
+	if not values.get("instance_name"):
 		return
 
 	settings = frappe.get_single("Evolution API Settings")
