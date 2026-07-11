@@ -1,1 +1,4 @@
-# Patches
+[pre_model_sync]
+
+[post_model_sync]
+frappe_whatsapp_evo.patches.migrate_evolution_settings_to_line
