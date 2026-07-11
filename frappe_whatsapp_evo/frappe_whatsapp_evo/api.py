@@ -129,16 +129,19 @@ def get_available_lines():
 
 @frappe.whitelist()
 def fetch_instances(line: str):
+	frappe.only_for("System Manager")
 	return EvolutionAPIClient(find_line(line)).fetch_instances()
 
 
 @frappe.whitelist()
 def get_qr_code(line: str):
+	frappe.only_for("System Manager")
 	return EvolutionAPIClient(find_line(line)).get_qr_code()
 
 
 @frappe.whitelist()
 def diagnose_webhook_routes(line: str):
+	frappe.only_for("System Manager")
 	client = EvolutionAPIClient(find_line(line))
 	instance = client.get_route_instance_name()
 	paths = [
@@ -162,6 +165,7 @@ def diagnose_webhook_routes(line: str):
 
 @frappe.whitelist()
 def test_connection(line: str):
+	frappe.only_for("System Manager")
 	row = find_line(line)
 	client = EvolutionAPIClient(row)
 	result = client.get_connection_state()
@@ -174,6 +178,7 @@ def test_connection(line: str):
 
 @frappe.whitelist()
 def configure_webhook(line: str):
+	frappe.only_for("System Manager")
 	row = find_line(line)
 	client = EvolutionAPIClient(row)
 	url = row.webhook_url

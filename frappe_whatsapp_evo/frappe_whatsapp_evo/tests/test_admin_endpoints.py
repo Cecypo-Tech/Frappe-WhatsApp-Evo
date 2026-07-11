@@ -51,3 +51,18 @@ class TestAdminEndpoints(IntegrationTestCase):
 	def test_test_connection_unknown_line_throws(self):
 		with self.assertRaises(frappe.ValidationError):
 			api.test_connection("TEST-DOES-NOT-EXIST")
+
+	@patch("frappe_whatsapp_evo.frappe_whatsapp_evo.client.EvolutionAPIClient.get_qr_code")
+	def test_get_qr_code_blocked_for_non_system_manager(self, mock_get_qr_code):
+		_add_line("TEST-ADMIN-QR")
+
+		with self.assertRaises(frappe.PermissionError):
+			with self.set_user("test1@example.com"):
+				api.get_qr_code("TEST-ADMIN-QR")
+
+		mock_get_qr_code.assert_not_called()
+
+	# Positive-path coverage (System Manager CAN still call an admin endpoint) is
+	# already provided by test_test_connection_writes_result_to_correct_row above,
+	# which runs as the implicit Administrator/System Manager test user and passes.
+	# A duplicate happy-path test here would be redundant.
