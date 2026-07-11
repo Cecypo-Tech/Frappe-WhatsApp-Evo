@@ -20,12 +20,30 @@ instances/numbers) configured in one place, with:
 
 ## Data model
 
+> **Revision (2026-07-11):** during implementation, Task 1 discovered that
+> Frappe does not support a Table field nested inside a doctype that is
+> itself a child table ("grandchild tables") — confirmed against this
+> bench's Frappe v16.20.0: `_init_child` in `frappe/model/base_document.py`
+> unconditionally blanks a child row's own table-field registry
+> (`child._table_fieldnames = TABLE_DOCTYPES_FOR_CHILD_TABLES`, a constant
+> that is always `{}`), regardless of what the child doctype's own meta
+> declares. The comment at that call site is explicit: "child tables don't
+> have child tables." Since `Evo Line` is itself a child row of
+> `Evolution API Settings.evo_lines`, its originally-planned nested
+> `limited_to_users` table could never be populated or read through the
+> normal Document API. The sections below reflect the corrected design:
+> user restrictions moved out to a second, sibling table
+> (`line_restrictions`) directly on `Evolution API Settings`, filtered by
+> `instance_name` instead of read off the line row. Nothing else in this
+> spec changed.
+
 ### `Evolution API Settings` (existing Single doctype)
 
 Stops holding connection/webhook/status fields directly. Becomes a thin
-wrapper around one table field:
+wrapper around two table fields:
 
 - `evo_lines` — Table, options `Evo Line`
+- `line_restrictions` — Table, options `Evo Line Restriction`
 
 ### `Evo Line` (new child doctype, `istable=1`)
 
@@ -53,24 +71,33 @@ Status section (2 columns):
 - *(column break)*
 - `last_connection_state` (JSON, read-only)
 
-Access section (full width):
-- `limited_to_users` — Table, options `Evo Line User`. Description: "If no
-  users are added, all users can use this line."
+`Evo Line` no longer has an Access section or `limited_to_users` field (see
+revision note above) — that responsibility moved to `Evolution API
+Settings.line_restrictions`.
 
-### `Evo Line User` (new child doctype, `istable=1`)
+### `Evo Line Restriction` (new child doctype, `istable=1`)
 
+A flat, sibling table on `Evolution API Settings` (not nested inside `Evo
+Line`) — one row per (line, user) restriction pair:
+
+- `line` — Data, reqd. Must match an existing `Evo Line.instance_name`
+  (validated in `Evolution API Settings.validate()`).
 - `user` — Link, options `User`, reqd
+
+A line with no matching `line_restrictions` rows is open to all users.
 
 ## Backend changes
 
 ### Line resolution
 
-A shared resolution helper (in `api.py`) takes an `instance_name` and:
+A shared resolution helper (in `evolution_api_settings.py`, used by `api.py`)
+takes an `instance_name` and:
 1. Loads the single `Evolution API Settings` doc.
 2. Finds the `Evo Line` row with that `instance_name`.
 3. Throws if not found, or if `disabled`.
-4. Throws `frappe.PermissionError` if `limited_to_users` is non-empty and
-   `frappe.session.user` is not in it.
+4. Throws `frappe.PermissionError` if any `line_restrictions` row matches
+   this `instance_name` and `frappe.session.user` is not one of the users
+   listed for it.
 5. Returns the row.
 
 This runs **server-side** inside every whitelisted entry point that acts on a
@@ -88,10 +115,11 @@ comes from that row.
 
 ### `get_available_lines()` (new whitelisted method)
 
-Returns enabled lines the current user is permitted to use (empty
-`limited_to_users` or user is listed), as `{value, label}` pairs using
-`instance_name` for both (no separate friendly-name field). Used to populate
-the dropdown in the "Send via WA" dialog.
+Returns enabled lines the current user is permitted to use (no matching
+`line_restrictions` row, or user is one of the ones listed for that line),
+as `{value, label}` pairs using `instance_name` for both (no separate
+friendly-name field). Used to populate the dropdown in the "Send via WA"
+dialog.
 
 ### Phone normalization
 
@@ -172,7 +200,7 @@ installs across the upgrade. Registered in `patches.txt`.
   `"91"`) to confirm the rule is generic, not hardcoded.
 - `Evo Line` validation: duplicate `instance_name` across rows raises a
   validation error.
-- Line resolution: disabled line is excluded/rejected; `limited_to_users`
+- Line resolution: disabled line is excluded/rejected; `line_restrictions`
   correctly filters `get_available_lines()` and is enforced (not just
   hidden) when calling `send_text`/`send_media` directly as a non-permitted
   user.

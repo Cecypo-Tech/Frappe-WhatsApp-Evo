@@ -4,7 +4,7 @@
 
 **Goal:** Replace the single-instance `Evolution API Settings` doctype with support for multiple named WhatsApp "lines" (Evo Line child rows), each independently configurable, disableable, and user-restricted, with a line picker wired into the send dialog and server-side permission enforcement.
 
-**Architecture:** `Evolution API Settings` stays a Single doctype but becomes a thin wrapper around a `Table` field (`evo_lines`) whose rows are a new child doctype `Evo Line`. Each `Evo Line` row carries everything `Evolution API Settings` used to hold directly (base_url, instance_name, api_key, timeout, default_country_code, webhook_secret/url, status fields) plus `disabled` and a `limited_to_users` child table (`Evo Line User`). `EvolutionAPIClient` is constructed from a specific `Evo Line` row instead of the global single. All send/admin endpoints resolve a line by `instance_name` and enforce `disabled`/`limited_to_users` server-side. The webhook endpoint identifies the line by matching the incoming token against each row's `webhook_secret`.
+**Architecture:** `Evolution API Settings` stays a Single doctype but becomes a thin wrapper around a `Table` field (`evo_lines`) whose rows are a new child doctype `Evo Line`. Each `Evo Line` row carries everything `Evolution API Settings` used to hold directly (base_url, instance_name, api_key, timeout, default_country_code, webhook_secret/url, status fields) plus `disabled`. User restrictions are **not** nested inside `Evo Line` — Frappe does not support a Table field inside a doctype that is itself a child table ("grandchild tables"; confirmed against Frappe v16 core, `base_document.py`'s `_init_child` unconditionally blanks a child row's own table-field registry). Instead, `Evolution API Settings` gets a second, sibling Table field `line_restrictions` (child doctype `Evo Line Restriction`, rows: `line` + `user`), and restriction lookups filter that flat list by `instance_name`. `EvolutionAPIClient` is constructed from a specific `Evo Line` row instead of the global single. All send/admin endpoints resolve a line by `instance_name` and enforce `disabled`/line-restriction server-side. The webhook endpoint identifies the line by matching the incoming token against each row's `webhook_secret`.
 
 **Tech Stack:** Frappe Framework v16 (Python 3 backend, vanilla `frappe.ui` JS frontend), MariaDB/Postgres via Frappe ORM, `frappe.tests.IntegrationTestCase` for tests.
 
@@ -14,18 +14,20 @@
 - App path: `/home/kushal/frappe-bench/apps/frappe_whatsapp_evo` (repo root for all file paths below, which are given relative to this root).
 - Module name for all new doctypes: `Frappe Whatsapp Evo` (matches existing `modules.txt`).
 - No new friendly "Line Name" field — `instance_name` is used as both technical identifier and dropdown label (per approved spec).
-- `limited_to_users` empty means "all users allowed" — this must hold both in the UI dropdown filter and in server-side enforcement.
+- A line with no matching `line_restrictions` rows means "all users allowed" — this must hold both in the UI dropdown filter and in server-side enforcement.
 - Never log secrets (`api_key`, `webhook_secret`) in plaintext — reuse the existing `redact_secrets()` helper in `client.py` wherever API responses are surfaced.
 - Every new whitelisted method must work for a non-Administrator `System Manager` session the same as it did before (no permission regressions on the existing single-line flow).
 
 ---
 
-### Task 1: Data model — Evo Line, Evo Line User, Evolution API Settings restructure
+### Task 1: Data model — Evo Line, Evo Line Restriction, Evolution API Settings restructure
+
+**Note on this revision:** the original brief for this task nested a `limited_to_users` Table field inside `Evo Line`. Frappe does not support a Table field inside a doctype that is itself a child table ("grandchild tables") — `_init_child` in `frappe/model/base_document.py` unconditionally blanks a child row's own table-field registry (`child._table_fieldnames = TABLE_DOCTYPES_FOR_CHILD_TABLES` where that constant is always `{}`), regardless of what the child's own meta declares, and this is deliberate policy ("child tables don't have child tables"), confirmed against this bench's Frappe v16.20.0. So user restrictions are modeled as a second, sibling Table field on `Evolution API Settings` instead of nesting inside `Evo Line`.
 
 **Files:**
-- Create: `frappe_whatsapp_evo/frappe_whatsapp_evo/doctype/evo_line_user/__init__.py`
-- Create: `frappe_whatsapp_evo/frappe_whatsapp_evo/doctype/evo_line_user/evo_line_user.json`
-- Create: `frappe_whatsapp_evo/frappe_whatsapp_evo/doctype/evo_line_user/evo_line_user.py`
+- Create: `frappe_whatsapp_evo/frappe_whatsapp_evo/doctype/evo_line_restriction/__init__.py`
+- Create: `frappe_whatsapp_evo/frappe_whatsapp_evo/doctype/evo_line_restriction/evo_line_restriction.json`
+- Create: `frappe_whatsapp_evo/frappe_whatsapp_evo/doctype/evo_line_restriction/evo_line_restriction.py`
 - Create: `frappe_whatsapp_evo/frappe_whatsapp_evo/doctype/evo_line/__init__.py`
 - Create: `frappe_whatsapp_evo/frappe_whatsapp_evo/doctype/evo_line/evo_line.json`
 - Create: `frappe_whatsapp_evo/frappe_whatsapp_evo/doctype/evo_line/evo_line.py`
@@ -35,32 +37,41 @@
 
 **Interfaces:**
 - Produces (used by Tasks 2-6): `frappe_whatsapp_evo.frappe_whatsapp_evo.doctype.evolution_api_settings.evolution_api_settings`:
-  - `find_line(instance_name: str) -> Document` — returns the `Evo Line` row or throws `frappe.DoesNotExistError`-style `frappe.throw` if not found. No disabled/permission checks (used by admin endpoints).
+  - `find_line(instance_name: str) -> Document` — returns the `Evo Line` row or throws `frappe.throw` (`ValidationError`) if not found. No disabled/permission checks (used by admin endpoints).
   - `get_line(instance_name: str) -> Document` — calls `find_line`, then throws if `row.disabled`, then throws `frappe.PermissionError` if the current session user isn't permitted. Used by send endpoints.
-  - `is_line_permitted(row, user: str) -> bool` — `True` if `row.limited_to_users` is empty or `user` is in it.
+  - `is_line_permitted(instance_name: str, user: str) -> bool` — `True` if no `line_restrictions` row matches `instance_name`, or `user` is one of the ones that do. **Takes `instance_name`, not a row** — it looks up `Evolution API Settings.line_restrictions` itself.
   - `get_available_lines_for_user(user: str | None = None) -> list[str]` — enabled + permitted `instance_name`s for `user` (defaults to `frappe.session.user`).
 - Produces (used by Task 2): `Evo Line.get_webhook_url(self) -> str` — instance method on the child doc, NOT an auto-firing hook (Frappe does not call custom `validate()` on child rows automatically — only mandatory/select/length checks run automatically for children; the parent's own `validate()` must loop rows itself and call this method explicitly).
 
-- [ ] **Step 1: Create the `Evo Line User` child doctype**
+- [ ] **Step 1: Create the `Evo Line Restriction` child doctype**
 
-`frappe_whatsapp_evo/frappe_whatsapp_evo/doctype/evo_line_user/__init__.py`:
+`frappe_whatsapp_evo/frappe_whatsapp_evo/doctype/evo_line_restriction/__init__.py`:
 ```python
 ```
 (empty file, matches convention of other doctype `__init__.py` files in this app)
 
-`frappe_whatsapp_evo/frappe_whatsapp_evo/doctype/evo_line_user/evo_line_user.json`:
+`frappe_whatsapp_evo/frappe_whatsapp_evo/doctype/evo_line_restriction/evo_line_restriction.json`:
 ```json
 {
  "actions": [],
  "allow_rename": 1,
- "creation": "2026-07-10 00:00:00.000000",
+ "creation": "2026-07-11 00:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
+  "line",
   "user"
  ],
  "fields": [
+  {
+   "description": "Must match an existing Evo Line's Instance Name.",
+   "fieldname": "line",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Line",
+   "reqd": 1
+  },
   {
    "fieldname": "user",
    "fieldtype": "Link",
@@ -73,10 +84,10 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-07-10 00:00:00.000000",
+ "modified": "2026-07-11 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Whatsapp Evo",
- "name": "Evo Line User",
+ "name": "Evo Line Restriction",
  "naming_rule": "Random",
  "owner": "Administrator",
  "permissions": [],
@@ -87,12 +98,12 @@
 }
 ```
 
-`frappe_whatsapp_evo/frappe_whatsapp_evo/doctype/evo_line_user/evo_line_user.py`:
+`frappe_whatsapp_evo/frappe_whatsapp_evo/doctype/evo_line_restriction/evo_line_restriction.py`:
 ```python
 from frappe.model.document import Document
 
 
-class EvoLineUser(Document):
+class EvoLineRestriction(Document):
 	pass
 ```
 
@@ -129,9 +140,7 @@ class EvoLineUser(Document):
   "status_section",
   "last_tested_on",
   "column_break_status",
-  "last_connection_state",
-  "access_section",
-  "limited_to_users"
+  "last_connection_state"
  ],
  "fields": [
   {
@@ -232,18 +241,6 @@ class EvoLineUser(Document):
    "fieldtype": "JSON",
    "label": "Last Connection State",
    "read_only": 1
-  },
-  {
-   "fieldname": "access_section",
-   "fieldtype": "Section Break",
-   "label": "Access"
-  },
-  {
-   "description": "If no users are added, all users can use this line.",
-   "fieldname": "limited_to_users",
-   "fieldtype": "Table",
-   "label": "Limited to Users",
-   "options": "Evo Line User"
   }
  ],
  "index_web_pages_for_search": 1,
@@ -279,7 +276,7 @@ class EvoLine(Document):
 		return frappe.utils.get_url(f"/api/method/frappe_whatsapp_evo.api.webhook{query}")
 ```
 
-- [ ] **Step 3: Rewrite `Evolution API Settings` to wrap the `evo_lines` table**
+- [ ] **Step 3: Rewrite `Evolution API Settings` to wrap `evo_lines` + `line_restrictions`**
 
 `frappe_whatsapp_evo/frappe_whatsapp_evo/doctype/evolution_api_settings/evolution_api_settings.json`:
 ```json
@@ -290,21 +287,41 @@ class EvoLine(Document):
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "evo_lines"
+  "lines_section",
+  "evo_lines",
+  "restrictions_section",
+  "line_restrictions"
  ],
  "fields": [
+  {
+   "fieldname": "lines_section",
+   "fieldtype": "Section Break",
+   "label": "Evo Lines"
+  },
   {
    "description": "Each row is an independent Evolution API connection (\"line\"). Add one row per WhatsApp number/instance.",
    "fieldname": "evo_lines",
    "fieldtype": "Table",
    "label": "Evo Lines",
    "options": "Evo Line"
+  },
+  {
+   "fieldname": "restrictions_section",
+   "fieldtype": "Section Break",
+   "label": "Line Restrictions"
+  },
+  {
+   "description": "Restrict which users can use a given line by adding rows here (Line must match an Evo Line's Instance Name). A line with no matching rows is open to all users.",
+   "fieldname": "line_restrictions",
+   "fieldtype": "Table",
+   "label": "Line Restrictions",
+   "options": "Evo Line Restriction"
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-07-10 00:00:00.000000",
+ "modified": "2026-07-11 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Whatsapp Evo",
  "name": "Evolution API Settings",
@@ -341,6 +358,7 @@ from frappe.model.document import Document
 class EvolutionAPISettings(Document):
 	def validate(self):
 		self.validate_lines()
+		self.validate_line_restrictions()
 
 	def validate_lines(self):
 		seen_instance_names = set()
@@ -369,6 +387,18 @@ class EvolutionAPISettings(Document):
 
 			row.webhook_url = row.get_webhook_url()
 
+	def validate_line_restrictions(self):
+		valid_instance_names = {row.instance_name for row in self.evo_lines}
+		for restriction in self.line_restrictions:
+			if restriction.line:
+				restriction.line = restriction.line.strip()
+			if restriction.line not in valid_instance_names:
+				frappe.throw(
+					_('Row #{0}: "{1}" does not match any Evo Line Instance Name').format(
+						restriction.idx, restriction.line
+					)
+				)
+
 
 def find_line(instance_name: str):
 	"""Return the Evo Line row with this instance_name, no disabled/permission checks."""
@@ -380,27 +410,32 @@ def find_line(instance_name: str):
 
 
 def get_line(instance_name: str):
-	"""Return the Evo Line row, enforcing disabled + Limited to Users for the current session user."""
+	"""Return the Evo Line row, enforcing disabled + line restrictions for the current session user."""
 	row = find_line(instance_name)
 	if row.disabled:
 		frappe.throw(_('Evo Line "{0}" is disabled').format(instance_name))
-	if not is_line_permitted(row, frappe.session.user):
+	if not is_line_permitted(instance_name, frappe.session.user):
 		frappe.throw(_('You are not permitted to use Evo Line "{0}"').format(instance_name), frappe.PermissionError)
 	return row
 
 
-def is_line_permitted(row, user: str) -> bool:
-	allowed_users = [u.user for u in (row.limited_to_users or [])]
+def is_line_permitted(instance_name: str, user: str) -> bool:
+	settings = frappe.get_single("Evolution API Settings")
+	allowed_users = [r.user for r in settings.line_restrictions if r.line == instance_name]
 	return not allowed_users or user in allowed_users
 
 
 def get_available_lines_for_user(user: str | None = None) -> list[str]:
 	user = user or frappe.session.user
 	settings = frappe.get_single("Evolution API Settings")
+	restricted_lines = {r.line for r in settings.line_restrictions}
+	allowed_restricted_lines = {r.line for r in settings.line_restrictions if r.user == user}
 	return [
 		row.instance_name
 		for row in settings.evo_lines
-		if not row.disabled and row.instance_name and is_line_permitted(row, user)
+		if not row.disabled
+		and row.instance_name
+		and (row.instance_name not in restricted_lines or row.instance_name in allowed_restricted_lines)
 	]
 ```
 
@@ -434,9 +469,16 @@ def _add_line(instance_name, **kwargs):
 	return row.name
 
 
+def _restrict_line(instance_name, user):
+	settings = frappe.get_single("Evolution API Settings")
+	settings.append("line_restrictions", {"line": instance_name, "user": user})
+	settings.save(ignore_permissions=True)
+
+
 class TestEvolutionAPISettings(IntegrationTestCase):
 	def tearDown(self):
 		settings = frappe.get_single("Evolution API Settings")
+		settings.line_restrictions = [r for r in settings.line_restrictions if not r.line.startswith("TEST-")]
 		settings.evo_lines = [r for r in settings.evo_lines if not r.instance_name.startswith("TEST-")]
 		settings.save(ignore_permissions=True)
 		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- test fixture must be visible to later queries
@@ -467,36 +509,28 @@ class TestEvolutionAPISettings(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			get_line("TEST-DISABLED")
 
-	def test_is_line_permitted_open_when_no_users_listed(self):
+	def test_line_restriction_must_match_existing_instance_name(self):
+		settings = frappe.get_single("Evolution API Settings")
+		settings.append("line_restrictions", {"line": "TEST-NO-SUCH-LINE", "user": "Administrator"})
+		with self.assertRaises(frappe.ValidationError):
+			settings.save(ignore_permissions=True)
+
+	def test_is_line_permitted_open_when_no_restrictions(self):
 		_add_line("TEST-OPEN")
-		row = find_line("TEST-OPEN")
-		self.assertTrue(is_line_permitted(row, "someone@example.com"))
+		self.assertTrue(is_line_permitted("TEST-OPEN", "someone@example.com"))
 
 	def test_is_line_permitted_restricted(self):
 		_add_line("TEST-RESTRICTED")
-		settings = frappe.get_single("Evolution API Settings")
-		row = next(r for r in settings.evo_lines if r.instance_name == "TEST-RESTRICTED")
-		row.append("limited_to_users", {"user": "Administrator"})
-		settings.save(ignore_permissions=True)
+		_restrict_line("TEST-RESTRICTED", "Administrator")
 
-		row = find_line("TEST-RESTRICTED")
-		self.assertTrue(is_line_permitted(row, "Administrator"))
-		self.assertFalse(is_line_permitted(row, "someone-else@example.com"))
+		self.assertTrue(is_line_permitted("TEST-RESTRICTED", "Administrator"))
+		self.assertFalse(is_line_permitted("TEST-RESTRICTED", "someone-else@example.com"))
 
 	def test_get_available_lines_for_user_excludes_disabled_and_restricted(self):
 		_add_line("TEST-AVAIL-OPEN")
 		_add_line("TEST-AVAIL-DISABLED", disabled=1)
-		settings = frappe.get_single("Evolution API Settings")
-		settings.append(
-			"evo_lines",
-			{
-				"base_url": "https://evo.example.com",
-				"instance_name": "TEST-AVAIL-RESTRICTED",
-				"api_key": "test-api-key",
-				"limited_to_users": [{"user": "Administrator"}],
-			},
-		)
-		settings.save(ignore_permissions=True)
+		_add_line("TEST-AVAIL-RESTRICTED")
+		_restrict_line("TEST-AVAIL-RESTRICTED", "Administrator")
 
 		available = get_available_lines_for_user("someone-else@example.com")
 		self.assertIn("TEST-AVAIL-OPEN", available)
@@ -515,13 +549,13 @@ cd /home/kushal/frappe-bench
 bench --site dev.localhost migrate
 bench --site dev.localhost run-tests --app frappe_whatsapp_evo --module frappe_whatsapp_evo.frappe_whatsapp_evo.doctype.evolution_api_settings.test_evolution_api_settings
 ```
-Expected: migrate completes without error (new `tabEvo Line` / `tabEvo Line User` tables created, old single fields no longer read by the JSON); all 8 tests in the module PASS.
+Expected: migrate completes without error (new `tabEvo Line` / `tabEvo Line Restriction` tables created, old single fields no longer read by the JSON); all 8 tests in the module PASS.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add frappe_whatsapp_evo/frappe_whatsapp_evo/doctype/evo_line_user frappe_whatsapp_evo/frappe_whatsapp_evo/doctype/evo_line frappe_whatsapp_evo/frappe_whatsapp_evo/doctype/evolution_api_settings
-git commit -m "feat(evo-lines): add Evo Line/Evo Line User child doctypes, restructure Evolution API Settings"
+git add frappe_whatsapp_evo/frappe_whatsapp_evo/doctype/evo_line_restriction frappe_whatsapp_evo/frappe_whatsapp_evo/doctype/evo_line frappe_whatsapp_evo/frappe_whatsapp_evo/doctype/evolution_api_settings
+git commit -m "feat(evo-lines): add Evo Line/Evo Line Restriction child doctypes, restructure Evolution API Settings"
 ```
 
 ---
@@ -704,9 +738,16 @@ def _add_line(instance_name, **kwargs):
 	settings.save(ignore_permissions=True)
 
 
+def _restrict_line(instance_name, user):
+	settings = frappe.get_single("Evolution API Settings")
+	settings.append("line_restrictions", {"line": instance_name, "user": user})
+	settings.save(ignore_permissions=True)
+
+
 class TestSendPermissions(IntegrationTestCase):
 	def tearDown(self):
 		settings = frappe.get_single("Evolution API Settings")
+		settings.line_restrictions = [r for r in settings.line_restrictions if not r.line.startswith("TEST-")]
 		settings.evo_lines = [r for r in settings.evo_lines if not r.instance_name.startswith("TEST-")]
 		settings.save(ignore_permissions=True)
 		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- test fixture must be visible to later queries
@@ -726,7 +767,8 @@ class TestSendPermissions(IntegrationTestCase):
 		log.delete(ignore_permissions=True)
 
 	def test_send_text_restricted_line_blocks_unlisted_user(self):
-		_add_line("TEST-SEND-RESTRICTED", limited_to_users=[{"user": "Administrator"}])
+		_add_line("TEST-SEND-RESTRICTED")
+		_restrict_line("TEST-SEND-RESTRICTED", "Administrator")
 
 		with self.assertRaises(frappe.PermissionError):
 			with self.set_user("Guest"):
@@ -2012,7 +2054,7 @@ bench --site dev.localhost clear-cache
 Then in the browser, on any non-excluded doctype form (e.g. a Contact or Sales Invoice): open the menu → "Send via WA".
 - With 2+ enabled lines you have access to: confirm the "Line" dropdown shows all of them, defaulting to the first.
 - With exactly 1 accessible line: confirm the dropdown still shows, preselected, no extra click needed.
-- Temporarily add `limited_to_users` on all lines restricted to a different user, or disable all lines, reload, and confirm the dialog does not open and an orange message explains why.
+- Temporarily add `line_restrictions` rows restricting all lines to a different user, or disable all lines, reload, and confirm the dialog does not open and an orange message explains why.
 - Send a text message and confirm the created `WhatsApp Evo Message` has `instance_name` set to the chosen line, and the phone number was normalized correctly (e.g. entering `0725548065` against a line with `default_country_code=254` stores `to_number = 254725548065`).
 
 - [ ] **Step 3: Commit**
