@@ -26,9 +26,35 @@ $(document).on("app_ready", function () {
 });
 
 frappe.whatsapp_evo.show_send_dialog = function (frm) {
+	frappe.call({
+		method: "frappe_whatsapp_evo.api.get_available_lines",
+		callback: function (r) {
+			const lines = r.message || [];
+			if (lines.length === 0) {
+				frappe.msgprint({
+					title: __("No WhatsApp Line Available"),
+					indicator: "orange",
+					message: __("There are no enabled Evo Lines you have access to. Ask an administrator to add or enable one."),
+				});
+				return;
+			}
+			frappe.whatsapp_evo.render_send_dialog(frm, lines);
+		},
+	});
+};
+
+frappe.whatsapp_evo.render_send_dialog = function (frm, lines) {
 	let dialog = new frappe.ui.Dialog({
 		title: __("Send via WA"),
 		fields: [
+			{
+				label: __("Line"),
+				fieldname: "line",
+				fieldtype: "Select",
+				options: lines,
+				default: lines[0],
+				reqd: 1,
+			},
 			{
 				label: __("Contact"),
 				fieldname: "contact",
@@ -87,6 +113,7 @@ frappe.whatsapp_evo.show_send_dialog = function (frm) {
 				args: {
 					to: values.mobile_no,
 					message: values.message,
+					line: values.line,
 					doctype: frm.doctype,
 					name: frm.docname,
 					attach_type: values.attach_type === "None" ? null : values.attach_type,
