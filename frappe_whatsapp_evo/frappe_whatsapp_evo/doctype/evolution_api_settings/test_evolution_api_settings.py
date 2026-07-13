@@ -55,6 +55,23 @@ class TestEvolutionAPISettings(IntegrationTestCase):
 		self.assertTrue(row.webhook_secret)
 		self.assertIn("frappe_whatsapp_evo.api.webhook", row.webhook_url)
 
+	def test_webhook_url_survives_resave_with_masked_secret(self):
+		"""A second save loads the Password field back in its masked (all-asterisk)
+		form; get_webhook_url() must still resolve the real secret, not persist
+		the mask itself into webhook_url."""
+		_add_line("TEST-WEBHOOK-RESAVE")
+		settings = frappe.get_single("Evolution API Settings")
+		row = next(r for r in settings.evo_lines if r.instance_name == "TEST-WEBHOOK-RESAVE")
+		real_token = row.get_password("webhook_secret")
+
+		# Re-save without touching the secret, simulating any later edit to the settings doc.
+		settings = frappe.get_single("Evolution API Settings")
+		settings.save(ignore_permissions=True)
+
+		settings = frappe.get_single("Evolution API Settings")
+		row = next(r for r in settings.evo_lines if r.instance_name == "TEST-WEBHOOK-RESAVE")
+		self.assertIn(f"token={real_token}", row.webhook_url)
+
 	def test_find_line_missing_throws(self):
 		with self.assertRaises(frappe.ValidationError):
 			find_line("TEST-DOES-NOT-EXIST")

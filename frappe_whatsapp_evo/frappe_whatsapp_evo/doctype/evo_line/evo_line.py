@@ -5,7 +5,7 @@ from frappe.model.document import Document
 class EvoLine(Document):
 	def get_webhook_url(self) -> str:
 		token = self.webhook_secret
-		if self.name and self.webhook_secret == "*****":
+		if self.name and token and self.is_dummy_password(token):
 			token = self.get_password("webhook_secret")
 
 		query = f"?token={token}" if token else ""
