@@ -25,22 +25,6 @@ You must have a running instance of the [Evolution API](https://github.com/evolu
 
 ![Send WhatsApp Dialog](https://i.imgur.com/RYHXoOT.png)
 
-## Installation
-
-```bash
-cd /home/frappeuser/bench16
-bench get-app /home/frappeuser/bench16/apps/frappe_whatsapp_evo
-bench --site your-site install-app frappe_whatsapp_evo
-bench --site your-site migrate
-```
-
-If the app is already present in `apps.txt`, install it directly:
-
-```bash
-bench --site your-site install-app frappe_whatsapp_evo
-bench --site your-site migrate
-```
-
 ## Setup
 
 1. Open **Evolution API Settings**.

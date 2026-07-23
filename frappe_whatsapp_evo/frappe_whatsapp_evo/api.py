@@ -502,5 +502,6 @@ def webhook():
 		)
 		doc.db_set("evolution_message_id", extracted["message_id"], update_modified=False)
 
-	frappe.db.commit()
+	# No manual commit: this whitelisted POST handler's transaction is committed
+	# automatically by Frappe when the request completes successfully.
 	return {"ok": True, "message_log": doc.name}
