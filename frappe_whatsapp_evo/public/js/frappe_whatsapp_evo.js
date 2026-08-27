@@ -56,16 +56,31 @@ frappe.whatsapp_evo.render_send_dialog = function (frm, lines) {
 				reqd: 1,
 			},
 			{
-				label: __("Contact"),
+				label: __("Recipient"),
+				fieldname: "recipient",
+				fieldtype: "Select",
+				options: [],
+				description: __("Numbers found on this document, its contacts and its customer."),
+				change: function () {
+					let choice = dialog.get_value("recipient");
+					// The label is the visible option; the number lives alongside it.
+					let match = (dialog.wa_candidates || []).find((c) => c.option === choice);
+					if (match) {
+						dialog.set_value("mobile_no", match.mobile_no);
+					}
+				},
+			},
+			{
+				label: __("Or pick another contact"),
 				fieldname: "contact",
 				fieldtype: "Link",
 				options: "Contact",
 				change: function () {
 					let contact = dialog.get_value("contact");
 					if (contact) {
-						frappe.db.get_value("Contact", contact, "mobile_no", (r) => {
-							if (r && r.mobile_no) {
-								dialog.set_value("mobile_no", r.mobile_no);
+						frappe.db.get_value("Contact", contact, ["mobile_no", "phone"], (r) => {
+							if (r && (r.mobile_no || r.phone)) {
+								dialog.set_value("mobile_no", r.mobile_no || r.phone);
 							}
 						});
 					}
@@ -137,7 +152,7 @@ frappe.whatsapp_evo.render_send_dialog = function (frm, lines) {
 		},
 	});
 
-	// Fetch default contact info
+	// Fetch candidate recipients, best first
 	frappe.call({
 		method: "frappe_whatsapp_evo.api.get_contact_info",
 		args: {
@@ -145,8 +160,42 @@ frappe.whatsapp_evo.render_send_dialog = function (frm, lines) {
 			name: frm.docname,
 		},
 		callback: function (r) {
-			if (r.message && r.message.mobile_no) {
+			if (!r.message) return;
+
+			let candidates = r.message.candidates || [];
+			// Distinguish two contacts that share a display name.
+			dialog.wa_candidates = candidates.map((c) => ({
+				...c,
+				option: `${c.label} - ${c.mobile_no}`,
+			}));
+
+			let options = dialog.wa_candidates.map((c) => c.option);
+			dialog.set_df_property("recipient", "options", options);
+			if (options.length) {
+				dialog.set_value("recipient", options[0]);
+			} else {
+				dialog.set_df_property(
+					"recipient",
+					"description",
+					__("No number found on this document. Pick a contact or type one below.")
+				);
+			}
+
+			if (r.message.mobile_no) {
 				dialog.set_value("mobile_no", r.message.mobile_no);
+			}
+
+			// Restrict the contact search to this document's party.
+			if (r.message.party_doctype && r.message.party) {
+				dialog.fields_dict.contact.get_query = function () {
+					return {
+						query: "frappe.contacts.doctype.contact.contact.contact_query",
+						filters: {
+							link_doctype: r.message.party_doctype,
+							link_name: r.message.party,
+						},
+					};
+				};
 			}
 		},
 	});
