@@ -27,10 +27,16 @@ $(document).on("app_ready", function () {
 
 frappe.whatsapp_evo.show_send_dialog = function (frm) {
 	frappe.call({
-		method: "frappe_whatsapp_evo.api.get_available_lines",
+		method: "frappe_whatsapp_evo.api.get_send_context",
+		args: {
+			doctype: frm.doctype,
+			name: frm.docname,
+		},
+		freeze: true,
+		freeze_message: __("Preparing WhatsApp message..."),
 		callback: function (r) {
-			const lines = r.message || [];
-			if (lines.length === 0) {
+			const context = r.message || {};
+			if (!(context.lines || []).length) {
 				frappe.msgprint({
 					title: __("No WhatsApp Line Available"),
 					indicator: "orange",
@@ -38,12 +44,23 @@ frappe.whatsapp_evo.show_send_dialog = function (frm) {
 				});
 				return;
 			}
-			frappe.whatsapp_evo.render_send_dialog(frm, lines);
+			frappe.whatsapp_evo.render_send_dialog(frm, context);
 		},
 	});
 };
 
-frappe.whatsapp_evo.render_send_dialog = function (frm, lines) {
+frappe.whatsapp_evo.render_send_dialog = function (frm, context) {
+	const lines = context.lines || [];
+	const recipients = context.recipients || {};
+	const printFormats = context.print_formats || [];
+
+	// Label and number together: two contacts can share a display name.
+	const candidates = (recipients.candidates || []).map((c) => ({
+		...c,
+		option: `${c.label} - ${c.mobile_no}`,
+	}));
+	const options = candidates.map((c) => c.option);
+
 	let dialog = new frappe.ui.Dialog({
 		title: __("Send via WA"),
 		fields: [
@@ -59,12 +76,14 @@ frappe.whatsapp_evo.render_send_dialog = function (frm, lines) {
 				label: __("Recipient"),
 				fieldname: "recipient",
 				fieldtype: "Select",
-				options: [],
-				description: __("Numbers found on this document, its contacts and its customer."),
+				options: options,
+				default: options[0],
+				description: options.length
+					? __("Numbers found on this document, its contacts and its customer.")
+					: __("No number found on this document. Pick a contact or type one below."),
 				change: function () {
 					let choice = dialog.get_value("recipient");
-					// The label is the visible option; the number lives alongside it.
-					let match = (dialog.wa_candidates || []).find((c) => c.option === choice);
+					let match = candidates.find((c) => c.option === choice);
 					if (match) {
 						dialog.set_value("mobile_no", match.mobile_no);
 					}
@@ -75,6 +94,17 @@ frappe.whatsapp_evo.render_send_dialog = function (frm, lines) {
 				fieldname: "contact",
 				fieldtype: "Link",
 				options: "Contact",
+				get_query: function () {
+					// Restrict the search to this document's party.
+					if (!recipients.party_doctype || !recipients.party) return {};
+					return {
+						query: "frappe.contacts.doctype.contact.contact.contact_query",
+						filters: {
+							link_doctype: recipients.party_doctype,
+							link_name: recipients.party,
+						},
+					};
+				},
 				change: function () {
 					let contact = dialog.get_value("contact");
 					if (contact) {
@@ -90,6 +120,7 @@ frappe.whatsapp_evo.render_send_dialog = function (frm, lines) {
 				label: __("Mobile Number"),
 				fieldname: "mobile_no",
 				fieldtype: "Data",
+				default: recipients.mobile_no || "",
 				reqd: 1,
 			},
 			{
@@ -99,6 +130,7 @@ frappe.whatsapp_evo.render_send_dialog = function (frm, lines) {
 				label: __("Message"),
 				fieldname: "message",
 				fieldtype: "Small Text",
+				default: (context.preview || {}).message || "",
 				reqd: 1,
 			},
 			{
@@ -112,7 +144,8 @@ frappe.whatsapp_evo.render_send_dialog = function (frm, lines) {
 				label: __("Print Format"),
 				fieldname: "print_format",
 				fieldtype: "Select",
-				options: [],
+				options: printFormats,
+				default: printFormats[0],
 				depends_on: "eval:doc.attach_type != 'None'",
 			},
 		],
@@ -150,80 +183,6 @@ frappe.whatsapp_evo.render_send_dialog = function (frm, lines) {
 				},
 			});
 		},
-	});
-
-	// Fetch candidate recipients, best first
-	frappe.call({
-		method: "frappe_whatsapp_evo.api.get_contact_info",
-		args: {
-			doctype: frm.doctype,
-			name: frm.docname,
-		},
-		callback: function (r) {
-			if (!r.message) return;
-
-			let candidates = r.message.candidates || [];
-			// Distinguish two contacts that share a display name.
-			dialog.wa_candidates = candidates.map((c) => ({
-				...c,
-				option: `${c.label} - ${c.mobile_no}`,
-			}));
-
-			let options = dialog.wa_candidates.map((c) => c.option);
-			dialog.set_df_property("recipient", "options", options);
-			if (options.length) {
-				dialog.set_value("recipient", options[0]);
-			} else {
-				dialog.set_df_property(
-					"recipient",
-					"description",
-					__("No number found on this document. Pick a contact or type one below.")
-				);
-			}
-
-			if (r.message.mobile_no) {
-				dialog.set_value("mobile_no", r.message.mobile_no);
-			}
-
-			// Restrict the contact search to this document's party.
-			if (r.message.party_doctype && r.message.party) {
-				dialog.fields_dict.contact.get_query = function () {
-					return {
-						query: "frappe.contacts.doctype.contact.contact.contact_query",
-						filters: {
-							link_doctype: r.message.party_doctype,
-							link_name: r.message.party,
-						},
-					};
-				};
-			}
-		},
-	});
-
-	// Fetch message preview
-	frappe.call({
-		method: "frappe_whatsapp_evo.api.get_message_preview",
-		args: {
-			doctype: frm.doctype,
-			name: frm.docname,
-		},
-		callback: function (r) {
-			if (r.message && r.message.message) {
-				dialog.set_value("message", r.message.message);
-			}
-		},
-	});
-
-	// Populate Print Formats
-	frappe.db.get_list("Print Format", {
-		filters: { doc_type: frm.doctype },
-		fields: ["name"],
-	}).then((r) => {
-		if (r && r.length > 0) {
-			let options = r.map((pf) => pf.name);
-			dialog.set_df_property("print_format", "options", options);
-			dialog.set_value("print_format", options[0]);
-		}
 	});
 
 	dialog.show();

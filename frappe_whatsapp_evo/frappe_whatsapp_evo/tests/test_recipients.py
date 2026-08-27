@@ -210,3 +210,73 @@ class TestEndpointPermissions(IntegrationTestCase):
 
 	def test_administrator_is_unaffected(self):
 		self.assertIn("mobile_no", api.get_contact_info("Note", self.note.name))
+
+
+class TestSendContext(IntegrationTestCase):
+	"""The dialog opens on one round trip instead of four."""
+
+	def setUp(self):
+		self.note = frappe.get_doc(
+			{"doctype": "Note", "title": f"_WA Ctx {frappe.generate_hash(length=8)}", "public": 1}
+		).insert(ignore_permissions=True)
+		self.addCleanup(frappe.set_user, "Administrator")
+
+	def tearDown(self):
+		frappe.set_user("Administrator")
+		frappe.delete_doc("Note", self.note.name, force=True, ignore_permissions=True)
+
+	def test_returns_everything_the_dialog_needs(self):
+		context = api.get_send_context("Note", self.note.name)
+
+		self.assertEqual(
+			sorted(context.keys()), ["lines", "preview", "print_formats", "recipients"]
+		)
+		self.assertIn("mobile_no", context["recipients"])
+		self.assertIn("candidates", context["recipients"])
+		self.assertIn("message", context["preview"])
+		self.assertIsInstance(context["print_formats"], list)
+
+	def test_print_formats_are_scoped_to_the_doctype(self):
+		names = api.get_send_context("Note", self.note.name)["print_formats"]
+		for name in names:
+			self.assertEqual(frappe.db.get_value("Print Format", name, "doc_type"), "Note")
+
+	def test_disabled_print_formats_are_not_offered(self):
+		pf = frappe.get_doc(
+			{
+				"doctype": "Print Format",
+				"name": "_WA Disabled Format",
+				"doc_type": "Note",
+				"print_format_type": "Jinja",
+				"html": "<div>x</div>",
+				"disabled": 1,
+			}
+		).insert(ignore_permissions=True)
+		try:
+			self.assertNotIn(pf.name, api.get_send_context("Note", self.note.name)["print_formats"])
+		finally:
+			frappe.delete_doc("Print Format", pf.name, force=True, ignore_permissions=True)
+
+	def test_is_denied_without_read_permission(self):
+		email = TestEndpointPermissions.EMAIL
+		if not frappe.db.exists("User", email):
+			frappe.get_doc(
+				{
+					"doctype": "User",
+					"email": email,
+					"first_name": "_WA NoRoles",
+					"send_welcome_email": 0,
+					"user_type": "System User",
+				}
+			).insert(ignore_permissions=True)
+		private = frappe.get_doc(
+			{"doctype": "Note", "title": f"_WA Priv {frappe.generate_hash(length=8)}", "public": 0}
+		).insert(ignore_permissions=True)
+		try:
+			frappe.set_user(email)
+			with self.assertRaises(frappe.PermissionError):
+				api.get_send_context("Note", private.name)
+		finally:
+			frappe.set_user("Administrator")
+			frappe.delete_doc("Note", private.name, force=True, ignore_permissions=True)
+

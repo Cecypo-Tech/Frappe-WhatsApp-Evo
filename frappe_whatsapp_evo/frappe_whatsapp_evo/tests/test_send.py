@@ -102,3 +102,81 @@ class TestSendPermissions(IntegrationTestCase):
 			# _insert_message_log - clean up both by instance_name.
 			frappe.db.delete("WhatsApp Evo Message", {"instance_name": "TEST-RESEND-LINE"})
 			frappe.db.commit()  # nosemgrep: frappe-manual-commit -- test fixture must be visible to later queries
+
+
+class TestSendWithMediaPdfFailure(IntegrationTestCase):
+	"""A print format that cannot render must not reach the user as a traceback."""
+
+	def setUp(self):
+		self.note = frappe.get_doc(
+			{"doctype": "Note", "title": f"_WA PDF {frappe.generate_hash(length=8)}", "public": 1}
+		).insert(ignore_permissions=True)
+
+	def tearDown(self):
+		frappe.delete_doc("Note", self.note.name, force=True, ignore_permissions=True)
+		settings = frappe.get_single("Evolution API Settings")
+		settings.evo_lines = [r for r in settings.evo_lines if not r.instance_name.startswith("TEST-")]
+		settings.save(ignore_permissions=True)
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- test fixture must be visible to later queries
+
+	@patch("frappe.get_print")
+	def test_pdf_failure_raises_a_readable_error(self, mock_get_print):
+		# What wkhtmltopdf actually surfaces when an <img> cannot be loaded.
+		mock_get_print.side_effect = OSError("wkhtmltopdf reported an error:\nExit with code 1")
+		_add_line("TEST-PDF-FAIL")
+
+		with self.assertRaises(frappe.ValidationError) as caught:
+			api.send_whatsapp_with_media(
+				to="0725548065",
+				message="hi",
+				doctype="Note",
+				name=self.note.name,
+				line="TEST-PDF-FAIL",
+				attach_type="PDF",
+			)
+
+		message = str(caught.exception)
+		self.assertIn("Could not generate the PDF", message)
+		self.assertIn("Nothing was sent", message)
+
+	@patch("frappe.get_print")
+	def test_pdf_failure_is_recorded_as_a_failed_message(self, mock_get_print):
+		mock_get_print.side_effect = OSError("wkhtmltopdf reported an error:\nExit with code 1")
+		_add_line("TEST-PDF-LOG")
+
+		with self.assertRaises(frappe.ValidationError):
+			api.send_whatsapp_with_media(
+				to="0725548065",
+				message="hi",
+				doctype="Note",
+				name=self.note.name,
+				line="TEST-PDF-LOG",
+				attach_type="PDF",
+			)
+
+		log = frappe.get_all(
+			"WhatsApp Evo Message",
+			filters={"reference_doctype": "Note", "reference_name": self.note.name},
+			fields=["status", "error"],
+		)
+		self.assertEqual(len(log), 1)
+		self.assertEqual(log[0].status, "Failed")
+		self.assertIn("PDF generation failed", log[0].error)
+
+	@patch("frappe.get_print")
+	def test_unusable_line_fails_before_the_pdf_is_rendered(self, mock_get_print):
+		"""Rendering a PDF is expensive; an unusable line should fail first."""
+		_add_line("TEST-PDF-DISABLED", disabled=1)
+
+		with self.assertRaises(frappe.ValidationError):
+			api.send_whatsapp_with_media(
+				to="0725548065",
+				message="hi",
+				doctype="Note",
+				name=self.note.name,
+				line="TEST-PDF-DISABLED",
+				attach_type="PDF",
+			)
+
+		mock_get_print.assert_not_called()
+

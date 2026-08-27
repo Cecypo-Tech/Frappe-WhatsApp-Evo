@@ -368,22 +368,50 @@ def send_whatsapp_with_media(
 	doctype: str,
 	name: str,
 	line: str,
-	attach_type: str = None,  # "PDF" or None
-	print_format: str = None,
+	attach_type: str | None = None,  # "PDF" or None
+	print_format: str | None = None,
 ):
 	"""Send WhatsApp message with optional PDF attachment."""
 	_check_reference_permission(doctype, name)
 
-	if not attach_type or attach_type == "None":
+	if attach_type != "PDF":
 		return send_text(to=to, message=message, line=line, reference_doctype=doctype, reference_name=name)
 
-	if attach_type == "PDF":
+	# Resolve the line before rendering: a disabled or forbidden line should
+	# fail immediately rather than after the cost of building a PDF.
+	row = get_line(line)
+
+	try:
 		media_content = frappe.get_print(doctype, name, print_format=print_format, as_pdf=True)
-		filename = f"{name.replace('/', '-')}.pdf"
-		mimetype = "application/pdf"
-		mediatype = "document"
-	else:
-		return send_text(to=to, message=message, line=line, reference_doctype=doctype, reference_name=name)
+	except Exception as exc:
+		# wkhtmltopdf failures arrive as a raw traceback and are usually a
+		# broken image in the print format, not anything the sender did.
+		# Record the attempt and say plainly that nothing was sent.
+		_insert_message_log(
+			direction="Outgoing",
+			status="Failed",
+			to=to,
+			message=message,
+			message_type="document",
+			error=f"PDF generation failed: {exc}",
+			reference_doctype=doctype,
+			reference_name=name,
+			instance_name=row.instance_name,
+		)
+		frappe.log_error(title="WhatsApp Evo: PDF generation failed")
+		frappe.throw(
+			_("Could not generate the PDF for {0} {1}{2}. Nothing was sent.<br><br><pre>{3}</pre>").format(
+				_(doctype),
+				name,
+				_(" using print format {0}").format(print_format) if print_format else "",
+				frappe.utils.escape_html(str(exc)[:500]),
+			),
+			title=_("PDF Generation Failed"),
+		)
+
+	filename = f"{name.replace('/', '-')}.pdf"
+	mimetype = "application/pdf"
+	mediatype = "document"
 
 	b64_data = base64.b64encode(media_content).decode("utf-8")
 
@@ -398,6 +426,29 @@ def send_whatsapp_with_media(
 		reference_doctype=doctype,
 		reference_name=name,
 	)
+
+
+@frappe.whitelist()
+def get_send_context(doctype: str, name: str):
+	"""Everything the send dialog needs, in one round trip.
+
+	The dialog previously made four calls and populated itself as each landed,
+	so its fields filled in piecemeal and the code had to guard against options
+	arriving after a value was set.
+	"""
+	frappe.has_permission(doctype, "read", doc=name, throw=True)
+
+	return {
+		"lines": get_available_lines(),
+		"recipients": get_contact_info(doctype, name),
+		"preview": get_message_preview(doctype, name),
+		"print_formats": frappe.get_all(
+			"Print Format",
+			filters={"doc_type": doctype, "disabled": 0},
+			pluck="name",
+			order_by="name asc",
+		),
+	}
 
 
 @frappe.whitelist()
