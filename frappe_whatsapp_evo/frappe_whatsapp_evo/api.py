@@ -1,4 +1,5 @@
 import base64
+import hmac
 import json
 
 import frappe
@@ -14,6 +15,20 @@ from frappe_whatsapp_evo.frappe_whatsapp_evo.doctype.evolution_api_settings.evol
 	find_line,
 	get_line,
 )
+from frappe_whatsapp_evo.frappe_whatsapp_evo.recipients import get_party, get_recipient_candidates
+
+
+def _check_reference_permission(doctype: str | None, name: str | None):
+	"""Ensure the caller may read the document a message is attributed to.
+
+	Without this any logged-in user can send from the company's line while
+	pointing the log at a document they cannot see - and `_insert_message_log`
+	writes its Comment with `ignore_permissions=True`, so the comment would
+	land on that document too.
+	"""
+	if not doctype or not name:
+		return
+	frappe.has_permission(doctype, "read", doc=name, throw=True)
 
 
 def _as_json(value) -> str:
@@ -200,6 +215,7 @@ def send_text(
 	reference_doctype: str | None = None,
 	reference_name: str | None = None,
 ):
+	_check_reference_permission(reference_doctype, reference_name)
 	row = get_line(line)
 	client = EvolutionAPIClient(row)
 	try:
@@ -243,6 +259,7 @@ def send_media(
 	reference_doctype: str | None = None,
 	reference_name: str | None = None,
 ):
+	_check_reference_permission(reference_doctype, reference_name)
 	row = get_line(line)
 	client = EvolutionAPIClient(row)
 	try:
@@ -287,45 +304,31 @@ def send_media(
 
 @frappe.whitelist()
 def get_contact_info(doctype: str, name: str):
-	"""Try to find a mobile number for the given document."""
+	"""Return every number reachable from this document, best first.
+
+	`mobile_no` is the top candidate and stays for callers that only want one
+	number. `candidates` lets the send dialog offer a choice instead of
+	silently picking, which matters when a customer has several contacts.
+	"""
+	frappe.has_permission(doctype, "read", doc=name, throw=True)
+
 	doc = frappe.get_doc(doctype, name)
-	
-	# 1. Direct fields
-	for fieldname in ["mobile_no", "phone", "contact_mobile", "contact_phone", "whatsapp_no"]:
-		val = doc.get(fieldname)
-		if val:
-			return {"mobile_no": val}
+	candidates = get_recipient_candidates(doctype, name, doc=doc)
+	party_doctype, party = get_party(doc)
 
-	# 2. Check for contact_person
-	if doc.get("contact_person"):
-		contact = frappe.get_doc("Contact", doc.contact_person)
-		if contact.mobile_no:
-			return {"mobile_no": contact.mobile_no}
-
-	# 3. Check for linked Contact
-	contact_name = frappe.db.get_value("Dynamic Link", 
-		{"link_doctype": doctype, "link_name": name, "parenttype": "Contact"}, 
-		"parent"
-	)
-	if contact_name:
-		mobile = frappe.db.get_value("Contact", contact_name, "mobile_no")
-		if mobile:
-			return {"mobile_no": mobile}
-
-	# 4. Fallback for Customer/Supplier/Lead
-	if doctype in ["Customer", "Supplier", "Lead"]:
-		contact_name = frappe.db.get_value("Contact", {"links": ["like", f"%{name}%"]}, "name")
-		if contact_name:
-			mobile = frappe.db.get_value("Contact", contact_name, "mobile_no")
-			if mobile:
-				return {"mobile_no": mobile}
-
-	return {"mobile_no": ""}
+	return {
+		"mobile_no": candidates[0]["mobile_no"] if candidates else "",
+		"candidates": candidates,
+		"party_doctype": party_doctype,
+		"party": party,
+	}
 
 
 @frappe.whitelist()
 def get_message_preview(doctype: str, name: str):
 	"""Generate a smart preview message for the document."""
+	frappe.has_permission(doctype, "read", doc=name, throw=True)
+
 	doc = frappe.get_doc(doctype, name)
 	
 	# Field Heuristics
@@ -369,6 +372,8 @@ def send_whatsapp_with_media(
 	print_format: str = None,
 ):
 	"""Send WhatsApp message with optional PDF attachment."""
+	_check_reference_permission(doctype, name)
+
 	if not attach_type or attach_type == "None":
 		return send_text(to=to, message=message, line=line, reference_doctype=doctype, reference_name=name)
 
@@ -438,7 +443,7 @@ def _find_line_by_webhook_token(token: str | None):
 	settings = frappe.get_single("Evolution API Settings")
 	for row in settings.evo_lines:
 		secret = row.get_password("webhook_secret") if row.webhook_secret else None
-		if secret and secret == token:
+		if secret and hmac.compare_digest(str(secret), str(token)):
 			return row
 	return None
 
